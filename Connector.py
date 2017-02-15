@@ -24,6 +24,7 @@ class BaseConnector:
         self._waits = {}
         self._ports = [80,443, 8080,3389,21,22,445,389,8081,27017] if (ports is None) else ports
         self.result = []
+        self.semap = asyncio.Semaphore(50)
 
 
     async def __aiter__(self):
@@ -31,6 +32,7 @@ class BaseConnector:
 
     async def __anext__(self):
         pass
+
     async def conncet(self, host, port):
         key = (host, port)
         conn = self._conns.get(key)
@@ -77,6 +79,17 @@ class BaseConnector:
         except Exception as e:
             return False
 
+    async def conn(self, host, port):
+        with (await self.semap):
+            result = await self.direct_con(host, port)
+            if result:
+                self.result.append(port)
+
+    def scan(self, host):
+        loop = self._loop
+        tasks = asyncio.wait([self.conn(host, p) for p in self._ports])
+        loop.run_until_complete(tasks)
+
     def scanhost(self, host):
         for port in self._ports:
             self._loop.create_task(self.conncet(host, port))
@@ -84,10 +97,10 @@ class BaseConnector:
 
 if __name__=="__main__":
     loop = asyncio.get_event_loop()
-    b = BaseConnector(conn_timeout=3,limit=500,loop=loop)
-    b.scanhost("127.0.0.1")
+    b = BaseConnector(conn_timeout=3,limit=500,loop=loop,ports=range(10000))
+    #b.scanhost("127.0.0.1")
+    b.scan("127.0.0.1")
     print(b.result)
-
 
 
 
