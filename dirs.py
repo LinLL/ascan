@@ -28,7 +28,9 @@ class Dirscaner:
         self.conerror = 0               #连接失败数，大于10次代表被封或者无法正常连接，抛出异常
         self.stop = False
         self.done = []
-        self.status302 = 0
+        self.status30x = 0
+        self.error30x_flag = False
+        self.keys_30x = None
 
     @property
     def session(self):
@@ -106,14 +108,26 @@ class Dirscaner:
                 print("Too many error connections. Take care of fireware!")
                 self.stop = True
             return
-        if self.error404_flag:
-            if response.status != 404:
-                self.done.append((url,response.status))
-
-        else:
+        if response.status in [301,302]:
+            self.status30x += 1
             content = await response.read()
-            if self.checkpath(keys, content):
+            if self.status30x>5 and not self.error30x_flag:
+                self.error30x_flag = True
+                self.keys_30x = self.catch_web_strs(content, 10)
+            if self.error30x_flag:
+                if self.checkpath(self.keys_30x, content):
+                    self.done.append((url, response.status))
+            else:
                 self.done.append((url, response.status))
+        else:
+            if self.error404_flag:                          #根据之前提取关键字时确定的404页面状态选择判断方法
+                if response.status != 404:
+                    self.done.append((url,response.status))
+
+            else:
+                content = await response.read()
+                if self.checkpath(keys, content):
+                    self.done.append((url, response.status))
 
         await response.release()
 
@@ -130,7 +144,7 @@ class Dirscaner:
         except asyncio.CancelledError as e:
             pass
         except Exception as e:
-            pass
+            print(e)
 
     async def scan(self):
         keys = self.fetch_error(self.host)
