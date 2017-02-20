@@ -35,7 +35,7 @@ class Dirscaner:
     @property
     def session(self):
         if self._session is None:
-            self._session = aiohttp.ClientSession(loop=self.loop)
+            self._session = aiohttp.ClientSession(loop=self.loop, read_timeout=10)
         return self._session
 
     def close(self):
@@ -99,14 +99,15 @@ class Dirscaner:
         else:
             return False
 
-    async def afetch_pate(self, url, keys):
+    async def afetch_page(self, url, keys):
         try:
             response = await self.session.get(url, allow_redirects=False)
-        except aiohttp.ClientError:
+        except aiohttp.ClientError as e :
             self.conerror += 1
             if self.conerror > 10:
                 print("Too many error connections. Take care of fireware!")
                 self.stop = True
+                self.conerror = 0
             return
         if response.status in [301,302]:
             self.status30x += 1
@@ -136,29 +137,40 @@ class Dirscaner:
             while True:
                 if self.stop == False:
                     url = await self.q.get()
+                    if "::" in url[0]:                               #避免双冒号出现在url中引发urljoion合并bug
+                        self.q.task_done()
+                        continue
+
                     url = urllib.parse.urljoin(self.host, url[0])
-                    await self.afetch_pate(url, keys)
+                    await self.afetch_page(url, keys)
                     self.q.task_done()
                 else:
-                    break
+                    await self.q.get()
+                    self.q.task_done()
         except asyncio.CancelledError as e:
             pass
         except Exception as e:
             print(e)
+            pass
 
     async def scan(self):
         keys = self.fetch_error(self.host)
+        asyncio.ensure_future(self.status(), loop=self.loop)
         workers = [asyncio.ensure_future(self.work(keys), loop=self.loop) for _ in range(self.max_workers)]
         self.getdic()
         await self.q.join()
         for w in workers:
             w.cancel()
 
+    async def status(self):
+        while True:
+            print(self.q.qsize())
+            await asyncio.sleep(10.0)
 
 if __name__=="__main__":
     import time
     t = time.time()
-    d = Dirscaner("http://www.baidu.com/", max_workers=50)
+    d = Dirscaner("http://www.jzyz.jzedu.cn/", max_workers=100)
     d.loop.run_until_complete(d.scan())
     d.close()
     t = time.time()-t
